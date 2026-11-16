@@ -3,8 +3,8 @@ name: Build Android APK
 on:
   workflow_dispatch:
   push:
-    tags:
-      - 'v*'
+    branches: [main]
+    tags: ['v*']
 
 permissions:
   contents: write
@@ -30,16 +30,40 @@ jobs:
       - name: Build debug APK
         run: gradle --no-daemon assembleDebug
 
+      - name: Rename APK
+        run: cp app/build/outputs/apk/debug/app-debug.apk AlbumPulse.apk
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: AlbumPulse-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: AlbumPulse.apk
           if-no-files-found: error
 
-      - name: Publish GitHub Release for version tags
+      # Versioned release when you push a tag like v1.0
+      - name: Publish release for version tags
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: app/build/outputs/apk/debug/app-debug.apk
+          files: AlbumPulse.apk
           generate_release_notes: true
+
+      # Rolling "latest" release on every push to main / manual run
+      - name: Move latest tag
+        if: github.ref == 'refs/heads/main'
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git tag -f latest
+          git push -f origin latest
+
+      - name: Publish latest release
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: AlbumPulse (latest build)
+          body: Newest APK built automatically from the main branch.
+          files: AlbumPulse.apk
+          prerelease: false
+          
