@@ -2,210 +2,112 @@ package com.example.albumpulse;
 
 import android.app.Activity;
 import android.content.*;
-import android.graphics.Color;
+import android.content.res.ColorStateList;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.media.MediaMetadata;
+import android.media.session.*;
 import android.net.Uri;
-import android.os.Bundle;
+import android.os.*;
 import android.provider.Settings;
 import android.view.Gravity;
-import android.view.View;
 import android.widget.*;
+import java.util.List;
 
 public class MainActivity extends Activity {
     static final String PREFS="album_pulse_settings", FALLBACK="fallback_uri", ENABLED="dynamic_enabled";
-    private Switch toggle;
-    private TextView accessStatus, wallpaperStatus, modeStatus;
-    private Button accessButton;
+    private final int bg=0xFF0B0D0E, panel=0xFF171A1B, accent=0xFFD7FF5F, muted=0xFF929A99, white=0xFFF2F4EF;
     private static final int PICK=410;
-    private final int bg=0xFF0A0C0F, surface=0xFF181C20, accent=0xFFD7FF5F, muted=0xFFA4AEB5, white=0xFFF5F7F2;
+    private Switch toggle;
+    private TextView permissionText,wallpaperText,trackTitle,trackArtist,elapsedText,durationText,playButton,modeText;
+    private SeekBar progress;
+    private Button permissionButton;
+    private MediaSessionManager sessions;
+    private MediaController controller;
+    private MediaController.Callback callback;
+    private boolean dragging=false;
+    private final Handler handler=new Handler(Looper.getMainLooper());
+    private final Runnable ticker=new Runnable(){public void run(){updateProgress();handler.postDelayed(this,500);}};
 
-    @Override public void onCreate(Bundle b) {
-        super.onCreate(b);
-        getWindow().setStatusBarColor(bg);
-        getWindow().setNavigationBarColor(bg);
-        buildInterface();
-        refresh();
+    @Override public void onCreate(Bundle b){
+        super.onCreate(b);getWindow().setStatusBarColor(bg);getWindow().setNavigationBarColor(bg);
+        sessions=(MediaSessionManager)getSystemService(MEDIA_SESSION_SERVICE);buildUi();
     }
+    private void buildUi(){
+        ScrollView scroll=new ScrollView(this);scroll.setFillViewport(true);scroll.setBackgroundColor(bg);
+        LinearLayout root=new LinearLayout(this);root.setOrientation(1);root.setPadding(dp(22),dp(24),dp(22),dp(28));scroll.addView(root);
+        LinearLayout top=new LinearLayout(this);top.setGravity(Gravity.CENTER_VERTICAL);
+        ImageView logo=new ImageView(this);logo.setImageResource(R.drawable.ic_album_pulse);top.addView(logo,new LinearLayout.LayoutParams(dp(38),dp(38)));
+        TextView brand=label("AlbumPulse",20,white,Typeface.BOLD);LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(0,-2,1);bp.leftMargin=dp(11);top.addView(brand,bp);
+        modeText=label("OFF",10,muted,Typeface.BOLD);modeText.setLetterSpacing(.12f);top.addView(modeText);root.addView(top);
+        TextView headline=label("Your music,\nyour wallpaper.",31,white,Typeface.BOLD);LinearLayout.LayoutParams hp=new LinearLayout.LayoutParams(-1,-2);hp.topMargin=dp(34);root.addView(headline,hp);
+        TextView sub=label("Album art on your lock screen. Nothing extra.",14,muted,Typeface.NORMAL);LinearLayout.LayoutParams sp=new LinearLayout.LayoutParams(-1,-2);sp.topMargin=dp(8);root.addView(sub,sp);
 
-    private void buildInterface() {
-        ScrollView scroll=new ScrollView(this);
-        scroll.setFillViewport(true);
-        scroll.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,new int[]{0xFF141A19,bg,bg}));
-        LinearLayout root=new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(22),dp(22),dp(22),dp(30));
-        scroll.addView(root);
+        LinearLayout player=panel();LinearLayout ph=new LinearLayout(this);ph.setGravity(Gravity.CENTER_VERTICAL);
+        TextView now=label("NOW PLAYING",10,accent,Typeface.BOLD);now.setLetterSpacing(.14f);ph.addView(now,new LinearLayout.LayoutParams(0,-2,1));
+        TextView source=label("MEDIA SESSION",9,muted,Typeface.BOLD);source.setLetterSpacing(.08f);ph.addView(source);player.addView(ph);
+        trackTitle=label("Nothing playing",18,white,Typeface.BOLD);LinearLayout.LayoutParams tp=new LinearLayout.LayoutParams(-1,-2);tp.topMargin=dp(22);player.addView(trackTitle,tp);
+        trackArtist=label("Start music in a supported player",13,muted,Typeface.NORMAL);LinearLayout.LayoutParams ap=new LinearLayout.LayoutParams(-1,-2);ap.topMargin=dp(5);player.addView(trackArtist,ap);
+        progress=new SeekBar(this);progress.setMax(1000);progress.setPadding(0,0,0,0);
+        progress.setProgressTintList(ColorStateList.valueOf(accent));progress.setProgressBackgroundTintList(ColorStateList.valueOf(0xFF3A403E));progress.setThumbTintList(ColorStateList.valueOf(accent));
+        LinearLayout.LayoutParams pp=new LinearLayout.LayoutParams(-1,dp(28));pp.topMargin=dp(18);player.addView(progress,pp);
+        progress.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
+            public void onProgressChanged(SeekBar s,int v,boolean u){}
+            public void onStartTrackingTouch(SeekBar s){dragging=true;}
+            public void onStopTrackingTouch(SeekBar s){dragging=false;if(controller!=null){long d=duration();if(d>0)controller.getTransportControls().seekTo(d*s.getProgress()/1000);}}
+        });
+        LinearLayout times=new LinearLayout(this);times.setGravity(Gravity.CENTER_VERTICAL);
+        elapsedText=label("0:00",11,muted,Typeface.NORMAL);durationText=label("0:00",11,muted,Typeface.NORMAL);
+        times.addView(elapsedText,new LinearLayout.LayoutParams(0,-2,1));times.addView(durationText);player.addView(times);
+        LinearLayout controls=new LinearLayout(this);controls.setGravity(Gravity.CENTER);controls.setPadding(0,dp(14),0,0);
+        controls.addView(control("Ⅱ‹",()->{if(controller!=null)controller.getTransportControls().skipToPrevious();}));
+        playButton=control("▶",()->togglePlayback());LinearLayout.LayoutParams playp=new LinearLayout.LayoutParams(dp(64),dp(54));playp.leftMargin=dp(26);playp.rightMargin=dp(26);controls.addView(playButton,playp);
+        controls.addView(control("›Ⅱ",()->{if(controller!=null)controller.getTransportControls().skipToNext();}));player.addView(controls);
+        LinearLayout.LayoutParams plp=new LinearLayout.LayoutParams(-1,-2);plp.topMargin=dp(28);root.addView(player,plp);
 
-        LinearLayout brand=new LinearLayout(this);
-        brand.setGravity(Gravity.CENTER_VERTICAL);
-        ImageView logo=new ImageView(this);
-        logo.setImageResource(R.drawable.ic_album_pulse);
-        brand.addView(logo,new LinearLayout.LayoutParams(dp(46),dp(46)));
-        LinearLayout brandText=new LinearLayout(this);
-        brandText.setOrientation(LinearLayout.VERTICAL);
-        brandText.setPadding(dp(12),0,0,0);
-        TextView name=txt("ALBUMPULSE",13,accent,Typeface.BOLD); name.setLetterSpacing(.16f);
-        brandText.addView(name);
-        TextView tagline=txt("MUSIC-POWERED WALLPAPERS",10,muted,Typeface.NORMAL); tagline.setLetterSpacing(.09f);
-        brandText.addView(tagline);
-        brand.addView(brandText,new LinearLayout.LayoutParams(0,-2,1));
-        TextView beta=txt("BETA",10,accent,Typeface.BOLD);
-        beta.setPadding(dp(11),dp(7),dp(11),dp(7)); beta.setBackground(shape(0xFF27331F,18));
-        brand.addView(beta); root.addView(brand);
+        LinearLayout settings=panel();TextView st=label("WALLPAPER",10,accent,Typeface.BOLD);st.setLetterSpacing(.14f);settings.addView(st);
+        LinearLayout tr=new LinearLayout(this);tr.setGravity(Gravity.CENTER_VERTICAL);tr.addView(label("Album artwork wallpaper",15,white,Typeface.BOLD),new LinearLayout.LayoutParams(0,-2,1));
+        toggle=new Switch(this);toggle.setButtonTintList(ColorStateList.valueOf(accent));tr.addView(toggle);settings.addView(tr);toggle.setOnCheckedChangeListener((v,on)->setEnabled(on));
+        wallpaperText=label("Choose a fallback image to begin.",12,muted,Typeface.NORMAL);LinearLayout.LayoutParams wtp=new LinearLayout.LayoutParams(-1,-2);wtp.topMargin=dp(5);settings.addView(wallpaperText,wtp);
+        Button choose=actionButton("Choose fallback wallpaper");LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(-1,dp(44));cp.topMargin=dp(13);settings.addView(choose,cp);choose.setOnClickListener(v->chooseWallpaper());
+        LinearLayout.LayoutParams setp=new LinearLayout.LayoutParams(-1,-2);setp.topMargin=dp(14);root.addView(settings,setp);
 
-        TextView hero=txt("Your music.\nYour lock screen.",34,white,Typeface.BOLD);
-        hero.setLineSpacing(dp(1),1f);
-        LinearLayout.LayoutParams hp=new LinearLayout.LayoutParams(-1,-2); hp.topMargin=dp(30);
-        root.addView(hero,hp);
-        TextView intro=txt("Album artwork takes over your lock-screen wallpaper while a track is playing. Your chosen wallpaper returns when playback stops.",14,muted,Typeface.NORMAL);
-        intro.setLineSpacing(dp(4),1f);
-        LinearLayout.LayoutParams ip=new LinearLayout.LayoutParams(-1,-2); ip.topMargin=dp(10); ip.bottomMargin=dp(22);
-        root.addView(intro,ip);
-
-        LinearLayout mode=card();
-        LinearLayout row=new LinearLayout(this); row.setGravity(Gravity.CENTER_VERTICAL);
-        TextView label=txt("DYNAMIC WALLPAPER",11,muted,Typeface.BOLD); label.setLetterSpacing(.12f);
-        row.addView(label,new LinearLayout.LayoutParams(0,-2,1));
-        modeStatus=txt("INACTIVE",10,muted,Typeface.BOLD);
-        modeStatus.setPadding(dp(10),dp(6),dp(10),dp(6)); modeStatus.setBackground(shape(0xFF2A2F33,30));
-        row.addView(modeStatus); mode.addView(row);
-        toggle=new Switch(this); toggle.setText("Enable album artwork"); toggle.setTextColor(white); toggle.setTextSize(16);
-        toggle.setPadding(0,dp(16),0,dp(6));
-        toggle.setButtonTintList(android.content.res.ColorStateList.valueOf(accent));
-        toggle.setOnCheckedChangeListener((v,on)->setEnabled(on)); mode.addView(toggle);
-        TextView hint=txt("Works with music apps that publish Android media-session artwork.",12,muted,Typeface.NORMAL);
-        hint.setLineSpacing(dp(3),1f); mode.addView(hint); root.addView(mode);
-
-        section(root,"SETUP","Two quick steps to get started");
-        LinearLayout wallpaper=card();
-        step(wallpaper,"01","Choose your normal wallpaper","This is restored whenever music stops.");
-        wallpaperStatus=txt("No wallpaper selected",12,muted,Typeface.NORMAL);
-        LinearLayout.LayoutParams wsp=new LinearLayout.LayoutParams(-1,-2); wsp.topMargin=dp(10);
-        wallpaper.addView(wallpaperStatus,wsp);
-        Button choose=button("Choose wallpaper"); choose.setOnClickListener(v->chooseWallpaper());
-        LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(-1,dp(48)); cp.topMargin=dp(14);
-        wallpaper.addView(choose,cp); root.addView(wallpaper);
-
-        LinearLayout permission=card();
-        step(permission,"02","Allow media detection","Android uses Notification Access to read active music-session details and album art.");
-        accessStatus=txt("Permission not enabled",12,muted,Typeface.NORMAL);
-        LinearLayout.LayoutParams asp=new LinearLayout.LayoutParams(-1,-2); asp.topMargin=dp(10);
-        permission.addView(accessStatus,asp);
-        accessButton=button("Open access settings");
-        accessButton.setOnClickListener(v->startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)));
-        LinearLayout.LayoutParams ap=new LinearLayout.LayoutParams(-1,dp(48)); ap.topMargin=dp(14);
-        permission.addView(accessButton,ap); root.addView(permission);
-
-        section(root,"GOOD TO KNOW","A couple of Android-specific details");
-        LinearLayout info=card();
-        info(info,"LOCK-SCREEN NOTIFICATIONS","Android controls whether notifications from other apps appear on the lock screen. AlbumPulse won't dismiss them or change their settings.");
-        View line=new View(this); line.setBackgroundColor(0xFF343B3E);
-        LinearLayout.LayoutParams linep=new LinearLayout.LayoutParams(-1,dp(1)); linep.topMargin=dp(15); linep.bottomMargin=dp(15);
-        info.addView(line,linep);
-        info(info,"SUPPORTED PLAYBACK","Spotify, YouTube Music and other players can work when they expose album art through Android media sessions.");
-        root.addView(info);
-        TextView footer=txt("MADE FOR THE MOMENT BETWEEN PLAY AND PAUSE",9,0xFF6F7B7F,Typeface.BOLD);
-        footer.setGravity(Gravity.CENTER); footer.setLetterSpacing(.08f);
-        LinearLayout.LayoutParams fp=new LinearLayout.LayoutParams(-1,-2); fp.topMargin=dp(26);
-        root.addView(footer,fp);
-        setContentView(scroll);
+        LinearLayout access=panel();TextView at=label("MEDIA ACCESS",10,accent,Typeface.BOLD);at.setLetterSpacing(.14f);access.addView(at);
+        permissionText=label("Notification access is required to detect playback.",12,muted,Typeface.NORMAL);LinearLayout.LayoutParams apt=new LinearLayout.LayoutParams(-1,-2);apt.topMargin=dp(8);access.addView(permissionText,apt);
+        permissionButton=actionButton("Open access settings");LinearLayout.LayoutParams abp=new LinearLayout.LayoutParams(-1,dp(44));abp.topMargin=dp(12);access.addView(permissionButton,abp);
+        permissionButton.setOnClickListener(v->startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)));
+        LinearLayout.LayoutParams acp=new LinearLayout.LayoutParams(-1,-2);acp.topMargin=dp(12);root.addView(access,acp);
+        TextView foot=label("While locked, use the media controls shown by your music app to skip tracks.",11,muted,Typeface.NORMAL);foot.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams fp=new LinearLayout.LayoutParams(-1,-2);fp.topMargin=dp(20);root.addView(foot,fp);setContentView(scroll);refreshSettings();
     }
-
-    private void section(LinearLayout root,String title,String subtitle) {
-        TextView h=txt(title,10,accent,Typeface.BOLD); h.setLetterSpacing(.16f);
-        LinearLayout.LayoutParams hp=new LinearLayout.LayoutParams(-1,-2); hp.topMargin=dp(25); root.addView(h,hp);
-        TextView s=txt(subtitle,17,white,Typeface.BOLD);
-        LinearLayout.LayoutParams sp=new LinearLayout.LayoutParams(-1,-2); sp.topMargin=dp(5); sp.bottomMargin=dp(12); root.addView(s,sp);
-    }
-
-    private LinearLayout card() {
-        LinearLayout box=new LinearLayout(this); box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(dp(18),dp(18),dp(18),dp(18)); box.setBackground(shape(surface,22)); box.setElevation(dp(2));
-        LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2); p.bottomMargin=dp(12); box.setLayoutParams(p);
-        return box;
-    }
-
-    private void step(LinearLayout box,String number,String title,String detail) {
-        LinearLayout row=new LinearLayout(this); row.setGravity(Gravity.TOP);
-        TextView n=txt(number,12,accent,Typeface.BOLD); n.setGravity(Gravity.CENTER); n.setBackground(shape(0xFF2B3723,12));
-        row.addView(n,new LinearLayout.LayoutParams(dp(36),dp(32)));
-        LinearLayout copy=new LinearLayout(this); copy.setOrientation(LinearLayout.VERTICAL); copy.setPadding(dp(12),0,0,0);
-        copy.addView(txt(title,16,white,Typeface.BOLD));
-        TextView d=txt(detail,12,muted,Typeface.NORMAL); d.setLineSpacing(dp(3),1f);
-        LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2); p.topMargin=dp(5); copy.addView(d,p);
-        row.addView(copy,new LinearLayout.LayoutParams(0,-2,1)); box.addView(row);
-    }
-
-    private void info(LinearLayout box,String title,String body) {
-        TextView h=txt(title,10,accent,Typeface.BOLD); h.setLetterSpacing(.1f); box.addView(h);
-        TextView d=txt(body,12,muted,Typeface.NORMAL); d.setLineSpacing(dp(4),1f);
-        LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2); p.topMargin=dp(6); box.addView(d,p);
-    }
-
-    private Button button(String label) {
-        Button b=new Button(this); b.setText(label); b.setAllCaps(false); b.setTextColor(0xFF11160F);
-        b.setTextSize(14); b.setTypeface(Typeface.DEFAULT,Typeface.BOLD); b.setBackground(shape(accent,14));
-        b.setPadding(dp(12),0,dp(12),0); b.setStateListAnimator(null); return b;
-    }
-
-    private TextView txt(String value,float size,int color,int style) {
-        TextView t=new TextView(this); t.setText(value); t.setTextSize(size); t.setTextColor(color);
-        t.setTypeface(Typeface.DEFAULT,style); return t;
-    }
-
-    private GradientDrawable shape(int color,float radius) {
-        GradientDrawable d=new GradientDrawable(); d.setColor(color); d.setCornerRadius(dp(radius)); return d;
-    }
-
-    private int dp(float value) { return (int)(value*getResources().getDisplayMetrics().density+.5f); }
-
-    private void chooseWallpaper() {
-        Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT); i.addCategory(Intent.CATEGORY_OPENABLE); i.setType("image/*");
-        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
-        startActivityForResult(i,PICK);
-    }
-
-    @Override protected void onResume() { super.onResume(); refresh(); }
-
-    private void refresh() {
-        String enabled=Settings.Secure.getString(getContentResolver(),"enabled_notification_listeners");
-        boolean access=enabled!=null&&enabled.contains(getPackageName());
-        SharedPreferences p=getSharedPreferences(PREFS,0);
-        String uri=p.getString(FALLBACK,null); boolean on=p.getBoolean(ENABLED,false);
-        accessStatus.setText(access?"Notification Access is connected":"Notification Access is needed");
-        accessStatus.setTextColor(access?accent:muted);
-        wallpaperStatus.setText(uri==null?"No wallpaper selected":"Your normal wallpaper is ready");
-        wallpaperStatus.setTextColor(uri==null?muted:accent);
-        modeStatus.setText(on?"NOW ACTIVE":"INACTIVE"); modeStatus.setTextColor(on?accent:muted);
-        modeStatus.setBackground(shape(on?0xFF2B3723:0xFF2A2F33,30));
-        toggle.setOnCheckedChangeListener(null); toggle.setChecked(on); toggle.setEnabled(access&&uri!=null);
-        toggle.setOnCheckedChangeListener((v,checked)->setEnabled(checked));
-        accessButton.setText(access?"Manage access settings":"Grant Notification Access");
-    }
-
-    @Override protected void onActivityResult(int req,int result,Intent data) {
-        super.onActivityResult(req,result,data);
-        if(req==PICK&&result==RESULT_OK&&data!=null&&data.getData()!=null) {
-            Uri u=data.getData();
-            try {
-                getContentResolver().takePersistableUriPermission(u,Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                getSharedPreferences(PREFS,0).edit().putString(FALLBACK,u.toString()).apply();
-                WallpaperEngine.applyFallback(this);
-            } catch(Exception ignored) {}
-            refresh();
-        }
-    }
-
-    private void setEnabled(boolean on) {
-        SharedPreferences p=getSharedPreferences(PREFS,0);
-        if(on&&p.getString(FALLBACK,null)==null) {
-            Toast.makeText(this,"Choose a normal wallpaper first.",Toast.LENGTH_SHORT).show(); refresh(); return;
-        }
-        p.edit().putBoolean(ENABLED,on).apply();
-        if(!on) { WallpaperEngine.applyFallback(this); p.edit().remove("last_dynamic_key").apply(); }
-        else try { android.service.notification.NotificationListenerService.requestRebind(new ComponentName(this,MusicListenerService.class)); }
-        catch(Exception ignored) {}
-        refresh();
-    }
+    private LinearLayout panel(){LinearLayout b=new LinearLayout(this);b.setOrientation(1);b.setPadding(dp(18),dp(18),dp(18),dp(16));GradientDrawable d=new GradientDrawable();d.setColor(panel);d.setCornerRadius(dp(18));b.setBackground(d);return b;}
+    private TextView label(String s,float size,int color,int style){TextView t=new TextView(this);t.setText(s);t.setTextSize(size);t.setTextColor(color);t.setTypeface(Typeface.DEFAULT,style);return t;}
+    private TextView control(String glyph,Runnable action){TextView t=label(glyph,22,white,Typeface.BOLD);t.setGravity(Gravity.CENTER);t.setOnClickListener(v->action.run());return t;}
+    private Button actionButton(String s){Button b=new Button(this);b.setText(s);b.setAllCaps(false);b.setTextSize(13);b.setTextColor(white);b.setTypeface(Typeface.DEFAULT,Typeface.BOLD);GradientDrawable d=new GradientDrawable();d.setColor(0xFF292F2D);d.setCornerRadius(dp(12));b.setBackground(d);b.setStateListAnimator(null);return b;}
+    private int dp(float v){return (int)(v*getResources().getDisplayMetrics().density+.5f);}
+    private void chooseWallpaper(){Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("image/*");i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);startActivityForResult(i,PICK);}
+    @Override protected void onResume(){super.onResume();refreshSettings();connectMedia();handler.removeCallbacks(ticker);handler.post(ticker);}
+    @Override protected void onPause(){handler.removeCallbacks(ticker);disconnectMedia();super.onPause();}
+    @Override protected void onActivityResult(int req,int res,Intent data){super.onActivityResult(req,res,data);if(req==PICK&&res==RESULT_OK&&data!=null&&data.getData()!=null){Uri u=data.getData();try{getContentResolver().takePersistableUriPermission(u,Intent.FLAG_GRANT_READ_URI_PERMISSION);getSharedPreferences(PREFS,0).edit().putString(FALLBACK,u.toString()).apply();WallpaperEngine.applyFallback(this);}catch(Exception ignored){}refreshSettings();}}
+    private boolean hasAccess(){String e=Settings.Secure.getString(getContentResolver(),"enabled_notification_listeners");return e!=null&&e.contains(getPackageName());}
+    private void refreshSettings(){if(toggle==null)return;SharedPreferences p=getSharedPreferences(PREFS,0);boolean a=hasAccess(),on=p.getBoolean(ENABLED,false),has=p.getString(FALLBACK,null)!=null;
+        permissionText.setText(a?"Connected":"Allow Notification Access to detect music.");permissionText.setTextColor(a?accent:muted);permissionButton.setText(a?"Manage access":"Grant access");
+        wallpaperText.setText(has?"Fallback wallpaper is set.":"Choose a fallback image to begin.");wallpaperText.setTextColor(has?accent:muted);modeText.setText(on?"ON":"OFF");modeText.setTextColor(on?accent:muted);
+        toggle.setOnCheckedChangeListener(null);toggle.setChecked(on);toggle.setEnabled(a&&has);toggle.setOnCheckedChangeListener((v,c)->setEnabled(c));}
+    private void setEnabled(boolean on){SharedPreferences p=getSharedPreferences(PREFS,0);if(on&&p.getString(FALLBACK,null)==null){Toast.makeText(this,"Choose a fallback wallpaper first.",Toast.LENGTH_SHORT).show();refreshSettings();return;}
+        p.edit().putBoolean(ENABLED,on).apply();if(!on){WallpaperEngine.applyFallback(this);p.edit().remove("last_dynamic_key").apply();}else try{android.service.notification.NotificationListenerService.requestRebind(new ComponentName(this,MusicListenerService.class));}catch(Exception ignored){}refreshSettings();}
+    private void connectMedia(){if(!hasAccess()||sessions==null){showNoTrack();return;}try{List<MediaController> list=sessions.getActiveSessions(new ComponentName(this,MusicListenerService.class));MediaController chosen=null;
+        for(MediaController c:list){PlaybackState s=c.getPlaybackState();if(s!=null&&s.getState()!=PlaybackState.STATE_NONE&&s.getState()!=PlaybackState.STATE_STOPPED){chosen=c;break;}}
+        if(chosen==null&&!list.isEmpty())chosen=list.get(0);if(chosen!=controller){disconnectMedia();controller=chosen;if(controller!=null){callback=new MediaController.Callback(){@Override public void onMetadataChanged(MediaMetadata m){runOnUiThread(()->showTrack());}@Override public void onPlaybackStateChanged(PlaybackState s){runOnUiThread(()->showTrack());}};controller.registerCallback(callback);}}showTrack();
+        }catch(SecurityException e){showNoTrack();}}
+    private void disconnectMedia(){if(controller!=null&&callback!=null)try{controller.unregisterCallback(callback);}catch(Exception ignored){}controller=null;callback=null;}
+    private void showNoTrack(){trackTitle.setText("Nothing playing");trackArtist.setText("Start music in a supported player");playButton.setText("▶");progress.setProgress(0);elapsedText.setText("0:00");durationText.setText("0:00");}
+    private void showTrack(){if(controller==null){showNoTrack();return;}MediaMetadata m=controller.getMetadata();if(m==null){showNoTrack();return;}CharSequence title=m.getText(MediaMetadata.METADATA_KEY_TITLE),artist=m.getText(MediaMetadata.METADATA_KEY_ARTIST);
+        trackTitle.setText(title==null?"Unknown track":title);trackArtist.setText(artist==null?controller.getPackageName():artist);updateProgress();}
+    private long duration(){return controller==null||controller.getMetadata()==null?0:controller.getMetadata().getLong(MediaMetadata.METADATA_KEY_DURATION);}
+    private void updateProgress(){if(controller==null)return;PlaybackState s=controller.getPlaybackState();long d=duration(),pos=s==null?0:Math.max(0,s.getPosition());
+        if(s!=null&&s.getState()==PlaybackState.STATE_PLAYING)pos+=(long)((SystemClock.elapsedRealtime()-s.getLastPositionUpdateTime())*s.getPlaybackSpeed());if(d>0)pos=Math.min(pos,d);
+        if(!dragging)progress.setProgress(d>0?(int)(pos*1000/d):0);elapsedText.setText(format(pos));durationText.setText(format(d));playButton.setText(s!=null&&s.getState()==PlaybackState.STATE_PLAYING?"Ⅱ":"▶");}
+    private String format(long ms){long s=Math.max(0,ms)/1000;return String.format(java.util.Locale.getDefault(),"%d:%02d",s/60,s%60);}
+    private void togglePlayback(){if(controller==null)return;PlaybackState s=controller.getPlaybackState();if(s!=null&&s.getState()==PlaybackState.STATE_PLAYING)controller.getTransportControls().pause();else controller.getTransportControls().play();}
 }
