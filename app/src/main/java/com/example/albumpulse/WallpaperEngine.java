@@ -75,7 +75,7 @@ final class WallpaperEngine {
 
     private static int sampleSize(int width,int height,int maxWidth,int maxHeight){
         int sample=1;
-        while(width/(sample*2)>=maxWidth&&height/(sample*2)>=maxHeight)sample*=2;
+        while(width/(sample*2)>maxWidth||height/(sample*2)>maxHeight)sample*=2;
         return sample;
     }
     private static String trim(String s,int n){
