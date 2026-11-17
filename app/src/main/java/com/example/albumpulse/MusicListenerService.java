@@ -4,6 +4,9 @@ import android.content.*;
 import android.graphics.Bitmap;
 import android.media.MediaMetadata;
 import android.media.session.*;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.SystemClock;
 import android.service.notification.*;
 import java.util.*;
 
@@ -13,6 +16,8 @@ public class MusicListenerService extends NotificationListenerService {
     private final Map<MediaController,MediaController.Callback> callbacks=new HashMap<>();
     private MediaSessionManager.OnActiveSessionsChangedListener listener;
     private boolean applied=false;
+    private final Handler handler=new Handler(Looper.getMainLooper());
+    private final Runnable progressTicker=new Runnable(){public void run(){update();handler.postDelayed(this,2000);}};
 
     @Override public void onListenerConnected(){
         super.onListenerConnected();
@@ -20,12 +25,12 @@ public class MusicListenerService extends NotificationListenerService {
         if(manager==null)return;
         listener=this::sync;
         try{manager.addOnActiveSessionsChangedListener(listener,new ComponentName(this,MusicListenerService.class));}catch(SecurityException ignored){}
-        refresh();
+        refresh();handler.removeCallbacks(progressTicker);handler.postDelayed(progressTicker,2000);
     }
     @Override public void onNotificationPosted(StatusBarNotification n){refresh();}
     @Override public void onNotificationRemoved(StatusBarNotification n){refresh();}
-    @Override public void onListenerDisconnected(){cleanup();restore();super.onListenerDisconnected();}
-    @Override public void onDestroy(){cleanup();restore();super.onDestroy();}
+    @Override public void onListenerDisconnected(){handler.removeCallbacks(progressTicker);cleanup();restore();super.onListenerDisconnected();}
+    @Override public void onDestroy(){handler.removeCallbacks(progressTicker);cleanup();restore();super.onDestroy();}
 
     private void refresh(){
         if(manager==null)return;
@@ -61,10 +66,14 @@ public class MusicListenerService extends NotificationListenerService {
             if(art==null)continue;
             String title=m.getString(MediaMetadata.METADATA_KEY_TITLE);
             String artist=m.getString(MediaMetadata.METADATA_KEY_ARTIST);
+            long duration=m.getLong(MediaMetadata.METADATA_KEY_DURATION);
+            long position=Math.max(0,s.getPosition());
+            if(s.getState()==PlaybackState.STATE_PLAYING)
+                position+=(long)((SystemClock.elapsedRealtime()-s.getLastPositionUpdateTime())*s.getPlaybackSpeed());
+            if(duration>0)position=Math.min(position,duration);
             String id=c.getPackageName()+"|"+title+"|"+artist;
             SharedPreferences p=getSharedPreferences(PREFS,0);
-            if(id.equals(p.getString(LAST,""))&&applied)return;
-            if(WallpaperEngine.applyArtwork(this,art,title,artist)){
+            if(WallpaperEngine.applyArtwork(this,art,title,artist,position,duration)){
                 p.edit().putString(LAST,id).apply();applied=true;
             }
             return;
