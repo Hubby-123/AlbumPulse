@@ -144,7 +144,7 @@ public class MainActivity extends Activity {
     }
 
     private Button button(String label) {
-        Button b=new Button(this); b.setText(label); b.setTextAllCaps(false); b.setTextColor(0xFF11160F);
+        Button b=new Button(this); b.setText(label); b.setAllCaps(false); b.setTextColor(0xFF11160F);
         b.setTextSize(14); b.setTypeface(Typeface.DEFAULT,Typeface.BOLD); b.setBackground(shape(accent,14));
         b.setPadding(dp(12),0,dp(12),0); b.setStateListAnimator(null); return b;
     }
