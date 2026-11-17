@@ -17,7 +17,6 @@ public class MusicListenerService extends NotificationListenerService {
     private MediaSessionManager.OnActiveSessionsChangedListener listener;
     private boolean applied=false;
     private final Handler handler=new Handler(Looper.getMainLooper());
-    private final Runnable progressTicker=new Runnable(){public void run(){update();handler.postDelayed(this,2000);}};
 
     @Override public void onListenerConnected(){
         super.onListenerConnected();
@@ -25,12 +24,12 @@ public class MusicListenerService extends NotificationListenerService {
         if(manager==null)return;
         listener=this::sync;
         try{manager.addOnActiveSessionsChangedListener(listener,new ComponentName(this,MusicListenerService.class));}catch(SecurityException ignored){}
-        refresh();handler.removeCallbacks(progressTicker);handler.postDelayed(progressTicker,2000);
+        refresh();
     }
     @Override public void onNotificationPosted(StatusBarNotification n){refresh();}
     @Override public void onNotificationRemoved(StatusBarNotification n){refresh();}
-    @Override public void onListenerDisconnected(){handler.removeCallbacks(progressTicker);cleanup();restore();super.onListenerDisconnected();}
-    @Override public void onDestroy(){handler.removeCallbacks(progressTicker);cleanup();restore();super.onDestroy();}
+    @Override public void onListenerDisconnected(){cleanup();restore();super.onListenerDisconnected();}
+    @Override public void onDestroy(){cleanup();restore();super.onDestroy();}
 
     private void refresh(){
         if(manager==null)return;
@@ -73,6 +72,9 @@ public class MusicListenerService extends NotificationListenerService {
             if(duration>0)position=Math.min(position,duration);
             String id=c.getPackageName()+"|"+title+"|"+artist;
             SharedPreferences p=getSharedPreferences(PREFS,0);
+            // Do not call setBitmap repeatedly for the same track: Android visibly
+            // flashes/recomposes the lock-screen wallpaper on every bitmap update.
+            if(id.equals(p.getString(LAST,"")))return;
             if(WallpaperEngine.applyArtwork(this,art,title,artist,position,duration)){
                 p.edit().putString(LAST,id).apply();applied=true;
             }
