@@ -1,4 +1,5 @@
 name: Build Android APK
+# Rebuild after the UI compile fix.
 
 on:
   workflow_dispatch:
