@@ -23,8 +23,8 @@ public class MainActivity extends Activity {
     private SeekBar progress;
     private Button permissionButton;
     private MediaSessionManager sessions;
-    private MediaController controller;
-    private MediaController.Callback callback;
+    private android.media.session.MediaController controller;
+    private android.media.session.MediaController.Callback callback;
     private boolean dragging=false;
     private final Handler handler=new Handler(Looper.getMainLooper());
     private final Runnable ticker=new Runnable(){public void run(){updateProgress();handler.postDelayed(this,500);}};
@@ -96,9 +96,9 @@ public class MainActivity extends Activity {
         toggle.setOnCheckedChangeListener(null);toggle.setChecked(on);toggle.setEnabled(a&&has);toggle.setOnCheckedChangeListener((v,c)->setEnabled(c));}
     private void setEnabled(boolean on){SharedPreferences p=getSharedPreferences(PREFS,0);if(on&&p.getString(FALLBACK,null)==null){Toast.makeText(this,"Choose a fallback wallpaper first.",Toast.LENGTH_SHORT).show();refreshSettings();return;}
         p.edit().putBoolean(ENABLED,on).apply();if(!on){WallpaperEngine.applyFallback(this);p.edit().remove("last_dynamic_key").apply();}else try{android.service.notification.NotificationListenerService.requestRebind(new ComponentName(this,MusicListenerService.class));}catch(Exception ignored){}refreshSettings();}
-    private void connectMedia(){if(!hasAccess()||sessions==null){showNoTrack();return;}try{List<MediaController> list=sessions.getActiveSessions(new ComponentName(this,MusicListenerService.class));MediaController chosen=null;
-        for(MediaController c:list){PlaybackState s=c.getPlaybackState();if(s!=null&&s.getState()!=PlaybackState.STATE_NONE&&s.getState()!=PlaybackState.STATE_STOPPED){chosen=c;break;}}
-        if(chosen==null&&!list.isEmpty())chosen=list.get(0);if(chosen!=controller){disconnectMedia();controller=chosen;if(controller!=null){callback=new MediaController.Callback(){@Override public void onMetadataChanged(MediaMetadata m){runOnUiThread(()->showTrack());}@Override public void onPlaybackStateChanged(PlaybackState s){runOnUiThread(()->showTrack());}};controller.registerCallback(callback);}}showTrack();
+    private void connectMedia(){if(!hasAccess()||sessions==null){showNoTrack();return;}try{List<android.media.session.MediaController> list=sessions.getActiveSessions(new ComponentName(this,MusicListenerService.class));android.media.session.MediaController chosen=null;
+        for(android.media.session.MediaController c:list){PlaybackState s=c.getPlaybackState();if(s!=null&&s.getState()!=PlaybackState.STATE_NONE&&s.getState()!=PlaybackState.STATE_STOPPED){chosen=c;break;}}
+        if(chosen==null&&!list.isEmpty())chosen=list.get(0);if(chosen!=controller){disconnectMedia();controller=chosen;if(controller!=null){callback=new android.media.session.MediaController.Callback(){@Override public void onMetadataChanged(MediaMetadata m){runOnUiThread(()->showTrack());}@Override public void onPlaybackStateChanged(PlaybackState s){runOnUiThread(()->showTrack());}};controller.registerCallback(callback);}}showTrack();
         }catch(SecurityException e){showNoTrack();}}
     private void disconnectMedia(){if(controller!=null&&callback!=null)try{controller.unregisterCallback(callback);}catch(Exception ignored){}controller=null;callback=null;}
     private void showNoTrack(){trackTitle.setText("Nothing playing");trackArtist.setText("Start music in a supported player");playButton.setText("▶");progress.setProgress(0);elapsedText.setText("0:00");durationText.setText("0:00");}
