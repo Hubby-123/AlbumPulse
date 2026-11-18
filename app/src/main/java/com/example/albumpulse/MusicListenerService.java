@@ -14,6 +14,16 @@ public class MusicListenerService extends NotificationListenerService {
     private MediaSessionManager.OnActiveSessionsChangedListener listener;
     private boolean applied=false;
 
+    @Override public int onStartCommand(android.content.Intent intent,int flags,int startId){
+        if(intent!=null&&intent.getAction()!=null){
+            String action=intent.getAction();
+            if(manager==null){manager=(MediaSessionManager)getSystemService(MEDIA_SESSION_SERVICE);}
+            try{if(manager!=null){List<MediaController> list=manager.getActiveSessions(new ComponentName(this,MusicListenerService.class));for(MediaController mc:list){PlaybackState st=mc.getPlaybackState();if(st!=null&&st.getState()==PlaybackState.STATE_PLAYING||st!=null&&st.getState()==PlaybackState.STATE_PAUSED){if("NEXT".equals(action))mc.getTransportControls().skipToNext();else if("PREV".equals(action))mc.getTransportControls().skipToPrevious();else if("TOGGLE".equals(action)){if(st.getState()==PlaybackState.STATE_PLAYING)mc.getTransportControls().pause();else mc.getTransportControls().play();}break;}}}}catch(SecurityException ignored){}
+            refreshWidget();
+        }
+        return START_NOT_STICKY;
+    }
+    private void refreshWidget(){AlbumWidgetProvider.refresh(this);}
     @Override public void onListenerConnected(){
         super.onListenerConnected();
         manager=(MediaSessionManager)getSystemService(MEDIA_SESSION_SERVICE);
@@ -75,6 +85,7 @@ public class MusicListenerService extends NotificationListenerService {
             String artist=metadata.getString(MediaMetadata.METADATA_KEY_ARTIST);
             String album=metadata.getString(MediaMetadata.METADATA_KEY_ALBUM);
             String mediaId=metadata.getString(MediaMetadata.METADATA_KEY_MEDIA_ID);
+            updateWidget(metadata,state);
             String id=c.getPackageName()+"|"+mediaId+"|"+album+"|"+title+"|"+artist;
 
             // Render only when the track changes; never rewrite the wallpaper every second.
@@ -88,6 +99,21 @@ public class MusicListenerService extends NotificationListenerService {
         restore();
     }
 
+    private void updateWidget(MediaMetadata md,PlaybackState state){
+        try{
+            android.appwidget.AppWidgetManager wm=android.appwidget.AppWidgetManager.getInstance(this);
+            int[] ids=wm.getAppWidgetIds(new android.content.ComponentName(this,AlbumWidgetProvider.class));
+            android.widget.RemoteViews v;
+            for(int id:ids){
+                v=new android.widget.RemoteViews(getPackageName(),R.layout.album_widget);
+                v.setTextViewText(R.id.title,md.getString(MediaMetadata.METADATA_KEY_TITLE)==null?"Unknown title":md.getString(MediaMetadata.METADATA_KEY_TITLE));
+                v.setTextViewText(R.id.artist,md.getString(MediaMetadata.METADATA_KEY_ARTIST)==null?"Unknown artist":md.getString(MediaMetadata.METADATA_KEY_ARTIST));
+                Bitmap art=md.getBitmap(MediaMetadata.METADATA_KEY_ART);if(art==null)art=md.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART);if(art!=null)v.setImageViewBitmap(R.id.art,art);
+                v.setImageViewResource(R.id.play,state!=null&&state.getState()==PlaybackState.STATE_PLAYING?R.drawable.ic_album_pulse:android.R.drawable.ic_media_play);
+                wm.updateAppWidget(id,v);
+            }
+        }catch(Exception ignored){}
+    }
     private void restore(){
         SharedPreferences prefs=getSharedPreferences(PREFS,0);
         if(applied||!prefs.getString(LAST,"").isEmpty()){
