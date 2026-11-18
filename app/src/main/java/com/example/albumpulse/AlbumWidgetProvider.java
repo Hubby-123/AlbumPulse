@@ -1,5 +1,7 @@
 package com.example.albumpulse;
 import android.appwidget.*;
+import android.app.PendingIntent;
+import android.widget.RemoteViews;
 import android.content.*;
 public class AlbumWidgetProvider extends AppWidgetProvider {
  static void refresh(Context c){ AppWidgetManager m=AppWidgetManager.getInstance(c); int[] ids=m.getAppWidgetIds(new ComponentName(c,AlbumWidgetProvider.class)); for(int id:ids) update(c,m,id); }
